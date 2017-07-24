@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import tf
 from matplotlib.widgets import Button
 from geometry_msgs.msg import *
+from math import *
 
 class BagReader:
     def __init__(self, bagfile, scan_topic, odom_topic, start_time, end_time):
@@ -37,7 +38,7 @@ class BagReader:
         laser_projector = LaserProjection()
         for topic, msg, time_stamp in self.bag.read_messages(topics=[self.scan_topic]):
             cloud = laser_projector.projectLaser(msg)
-            frame_points = np.zeros([0,3])
+            frame_points = np.zeros([0,2])
             for p in pc2.read_points(cloud, field_names=("x", "y", "z"), skip_nans=True):
                     #theta = math.atan2(p[0] , p[1])
                     #laser_range = np.pi
@@ -46,7 +47,7 @@ class BagReader:
                     #d = math.sqrt(p[0]*p[0] + p[1]*p[1])
                     #if d > 1.5 and theta > np.pi/2:
                     #    continue
-                    p2d = np.array([p[0], p[1], p[2]])
+                    p2d = np.array([p[0], p[1]])
                     frame_points = np.vstack([frame_points, p2d])
             self.points.append([time_stamp,frame_points])
 
@@ -57,11 +58,17 @@ class BagReader:
             qy = msg.pose.pose.orientation.y
             qz = msg.pose.pose.orientation.z
             qw = msg.pose.pose.orientation.w
-            t = tf.transformations.quaternion_matrix((qx,qy,qz,qw))
-            t[0,3] = msg.pose.pose.position.x
-            t[1,3] = msg.pose.pose.position.y
-            t[2,3] = msg.pose.pose.position.z
+            e = tf.transformations.euler_from_quaternion((qx,qy,qz,qw))
+            yaw = e[2]
+            t = np.array([[np.cos(yaw), -np.sin(yaw),msg.pose.pose.position.x], 
+                [np.sin(yaw),  np.cos(yaw),msg.pose.pose.position.y],
+                [0.,0.,1.]])
             self.odoms.append([time_stamp,t])
+            #R = np.array([[np.cos(yaw), -np.sin(yaw)], 
+            #    [np.sin(yaw),  np.cos(yaw)]])
+            #t = [msg.pose.pose.position.x,msg.pose.pose.position.y]
+            #self.odoms.append([time_stamp,(R,t)])
+
 
     def sync(self):
         idx = 0
@@ -72,13 +79,18 @@ class BagReader:
                     break
             if time_stamp_scan < start_time:
                 continue
-            time_stamp_odom,odom_data = self.odoms[idx]
             while idx < len(self.odoms) - 1:
-                if time_stamp_odom > time_stamp_scan:
+                if self.odoms[idx][0] > time_stamp_scan:
                     break
-                time_stamp_odom,odom_data = self.odoms[idx]
                 idx+=1
-            self.data.append((scan_data,odom_data))
+            time_stamp_odom_a,odom_data_a = self.odoms[idx]
+            time_stamp_odom_b,odom_data_b = self.odoms[idx-1]
+            if fabs(time_stamp_scan.to_sec() - time_stamp_odom_a.to_sec()) > fabs(time_stamp_scan.to_sec() - time_stamp_odom_b.to_sec()):
+                odom = odom_data_b
+            else:
+                odom = odom_data_a
+            self.data.append((scan_data,odom))
+
             
 
 

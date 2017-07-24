@@ -36,7 +36,6 @@ class graphSLAM_GUI(QtGui.QTabWidget):
         #Create ImageItem for map
         self.img = pg.ImageItem(np.zeros((400,400)))
         vb.addItem(self.img)
-        #self.img.setImage(np.random.rand(400,400))
 
     def ceate_tab_pointcloud(self):
         #  Create tab_pointcloud 
@@ -53,7 +52,10 @@ class graphSLAM_GUI(QtGui.QTabWidget):
         #Create ImageItem for map
         self.pcd = pg.ScatterPlotItem(size=3, pen=pg.mkPen(None), brush=pg.mkBrush(255, 255, 255, 120))
         vb.addItem(self.pcd)
-        #Set timer
+        self.robot = RobotItem('b')
+        self.robot.setParentItem(self.pcd)
+        self.robot.scale(0.03,0.03)
+
 
 
 class graphSLAM_GUI_Thread(threading.Thread):
@@ -92,7 +94,7 @@ class graphSLAM_GUI_Thread(threading.Thread):
             pass
         try:
             data = self.q_pcd.get(block=False)
-            self.q_pcd.queue.clear()
+            #self.q_pcd.queue.clear()
             spots = [{'pos': data[i,:] } for i in range(data.shape[0])]
             self.gui.pcd.addPoints(spots)
         except Queue.Empty:
@@ -105,6 +107,10 @@ class graphSLAM_GUI_Thread(threading.Thread):
     def setpcd(self, data):
         self.q_pcd.put( data )
         pass
+    
+    def setrobot(self, pose):
+        self.gui.robot.setRotation(180.*pose[2]/np.pi)
+        self.gui.robot.setPos(pose[0],pose[1])
 
 
 if __name__ == "__main__":

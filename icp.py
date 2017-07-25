@@ -13,6 +13,7 @@ import time
 from readbag import BagReader
 from common import *
 
+flann = FLANN()
 def calcRigidTranformation(MatA, MatB):
     A, B = np.copy(MatA), np.copy(MatB)
 
@@ -38,10 +39,10 @@ class ICP(object):
     def nearest_neighbor(self, src, dst):
         all_dists = cdist(src, dst, 'euclidean')
         indices = all_dists.argmin(axis=1)
-        #distances = all_dists[np.arange(all_dists.shape[0]), indices]
-        return  indices
+        distances = all_dists[np.arange(all_dists.shape[0]), indices]
+        return  indices, distances
 
-    def calculate(self, iter, init_R = None, init_t = None, tolerance=0.01):
+    def calculate(self, iter=200, init_R = None, init_t = None, tolerance=0.03):
         if init_R is None and init_t is None:
             old_points = np.copy(self.pointsB)
             new_points = np.copy(self.pointsB)
@@ -55,19 +56,24 @@ class ICP(object):
         for i in range(iter):
             #neighbor_idx = self.kdtree.query(old_points)[1]
             #targets = self.pointsB[neighbor_idx]
-            #indices = self.nearest_neighbor(old_points, self.pointsA)
-            #indices, dists = flann.nn(self.pointsA, old_points, 1, algorithm="kmeans", branching=32, iterations=5, checks=16)
+            #indices, dists = self.nearest_neighbor(old_points, self.pointsA)
+            indices, dists = flann.nn(self.pointsA, old_points, 1, algorithm="kmeans", branching=32, iterations=5, checks=16)
+            
+            inliner = dists<tolerance
+            cost = np.sum(dists[inliner])
+            indices = indices[inliner]
             targets = self.pointsA[indices]
-            r, t = calcRigidTranformation(old_points, targets)
+            #cost = np.sum(dists[dists<tolerance])
+            inliner_points=old_points[inliner]
+            r, t = calcRigidTranformation(inliner_points, targets)
             new_points = np.dot(r, old_points.T).T + t
             #print("--- %s seconds ---" % (time.time() - start_time))
 
             R = np.dot(R,r)
             T = T+t
-            #print i
-            cost = np.sum(np.abs(old_points - new_points))
-            #print i
-            if cost < tolerance:
+            #print i,':',inliner_points.shape[0]
+            if np.sum(np.abs(old_points - new_points)) < 0.001 and inliner_points.shape[0] > new_points.shape[0]* 0.6:
+                #print 'OK!'
                 break
 
             old_points = np.copy(new_points)

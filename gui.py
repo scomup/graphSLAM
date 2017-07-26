@@ -173,6 +173,7 @@ class graphSLAM_GUI_Thread(threading.Thread):
         self.guiobj.robot.setPos(pose[0],pose[1])
 
     def setgraph(self, pos, adj):
+        
         self.q_graph.put( (pos, adj) )
 
 

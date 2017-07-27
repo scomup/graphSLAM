@@ -51,6 +51,22 @@ def v2t(v):
          [0,  0,  1]], dtype=np.float64)
     return A
 
+
+def fix_angle(angle):
+    return atan2(sin(angle),cos(angle))
+
+def angle_diff(a, b):
+    a = fix_angle(a)
+    b = fix_angle(b)
+    d1 = a-b
+    d2 = 2*np.pi - fabs(d1)
+    if(d1 > 0):
+        d2 = -d2
+    if(fabs(d1) < fabs(d2)):
+        return d1
+    else:
+        return d2
+
 # see g2o.pdf in https://github.com/RainerKuemmerle/g2o/tree/master/doc
 def apply_motion_vector(pose, motion):
     return np.array([(pose[0]+motion[0]*np.cos(motion[2])-motion[1]*np.sin(motion[2])), \
@@ -58,15 +74,19 @@ def apply_motion_vector(pose, motion):
             np.mod(pose[2]+motion[2], 2*np.pi)-np.pi])
     
 def get_motion_vector(pose1, pose2):
-    return np.array([((pose1[0]-pose2[0])*np.cos(pose2[2])+(pose1[1]-pose2[1])*np.sin(pose2[2])),\
-            (-(pose1[0]-pose2[0])*np.sin(pose2[2])+(pose1[1]-pose2[1])*np.cos(pose2[2])),\
-            np.mod(pose2[2]-pose1[2], 2*np.pi)-np.pi])
+    return t2v(getDeltaM(v2t(pose2),v2t(pose1)))
     
 ###
 
 
 def transpose(R, t, scan):
     return np.dot(R, scan.T).T + t
+
+def transpose_by_pose(pose, scan):
+    m = v2t(pose)
+    scan_tmp = np.hstack((scan,np.ones((scan.shape[0],1))))
+    scan_tmp = np.dot(m,scan_tmp.T).T
+    return scan_tmp[:,0:2]
 
 if __name__ == "__main__":
     pose = [2. , 1.3 ,1.4]

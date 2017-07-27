@@ -7,10 +7,18 @@ from icp import ICP
 from gui import graphSLAM_GUI_Thread
 from readbag import BagReader
 from common import *
+from posegraph import PoseGraph, PoseEdge
+from pyflann import FLANN
+
+from scipy.spatial import distance
+
+from hough import check_loop_candidate
+from costmap import CostMap
+
 
 ##########################
-#bagfile = '/home/liu/tokyo_bag/lg_2.bag'
 bagfile = '/home/liu/tokyo_bag/lg_2.bag'
+#bagfile = '/home/liu/tokyo_bag/rp_2.bag'
 scan_topic = '/scan' 
 odom_topic = '/odom'
 #bagfile = '/home/liu/bag_kusatsu/rp_kusatsu_C5_1.bag'
@@ -35,102 +43,158 @@ base_yaw_ = 0.03
 #base_yaw_ = -1.54
 
 ##########################
-d_thresh_ = .1
+d_thresh_ = .5
 a_thresh_ = np.pi/6
 ##########################
-
+min_loop_dist_ = 30
+max_dist_ = 1
+weight_trans_ = 1
+weight_rot_ = 100
+opt_iter_ = 5
+##########################
 
 class graphSLAM():
-    def __init__(self, raw_data, gui):
-        self.raw_data = raw_data
+    def __init__(self, raw_data,gui):
         self.gui = gui
-        self.idx = 0
+        self.costmap = CostMap()
         x = base_x_
         y = base_y_
         yaw = base_yaw_
-        self.scan_base = np.array([[np.cos(yaw), -np.sin(yaw),x], 
-            [np.sin(yaw),  np.cos(yaw),  y],
+        self.scan_base = np.array([[np.cos(base_yaw_), -np.sin(base_yaw_),base_x_], 
+            [np.sin(base_yaw_),  np.cos(base_yaw_),  base_y_],
             [0.,0.,1.]])
-        self.size = len(self.raw_data)
-        self.dur = time.time() - time.time()
-        self.pose_matrix = np.eye(3)
-        self.graph_base = []
+        self.pg = PoseGraph() # LS-SLAM pose graph
+        self.node_scan = self.readdata(raw_data)
+        self.creategraph(self.node_scan)
+        # Show graph before optimization
+        self.show_graph()
+        self.show_pointcloud()
+
+        #self.gui.setpcd(pos, adj)
+
+    def show_graph(self):
+        adj = np.array([[edge.id_from, edge.id_to] for edge in self.pg.edges])
+        pos = self.pg.nodes[:,0:2]
+        self.gui.setgraph(pos, adj)
+
+    def show_pointcloud(self):
+        pcd = np.array([[0,0]])
+        for scan, pose in self.node_scan:
+            scan_trans = transpose_by_pose(pose,scan)
+            pcd = np.vstack((pcd,scan_trans))
+        self.gui.setpcd(pcd)
+
+    def show_map(self):
+        for scan, pose in self.node_scan:
+            scan_trans = transpose_by_pose(pose,scan)
+            pcd = np.vstack((pcd,scan_trans))
+            idx = self.costmap.world_map(pcd)
+            
+        self.gui.setpcd(pcd)
+
+
+    def update(self):
+        pcd = np.array([[0,0]])
+        #self.node_scan.clear()
+        node_scan = []
+        #del self.node_scan[:]
+        for i in range(len(self.node_scan)):
+            scan, pose = self.node_scan[i]
+            old_pose = self.pg.nodes[i,:]
+            node_scan.append((scan, self.pg.nodes[i,:]))
+        self.node_scan = node_scan
 
     def checkupdate(self,pre_pose,cur_pose):
         dx = pre_pose[0] - cur_pose[0]
         dy = pre_pose[1] - cur_pose[1]
-        da = pre_pose[2] - cur_pose[2]
+        da = angle_diff(pre_pose[2],cur_pose[2])
         trans = sqrt(dx**2 + dy**2)
         update = (trans > d_thresh_) or (fabs(da) > a_thresh_)
         return update
 
     def run(self):
-        while self.idx < self.size:
+        while True:
             time.sleep(0.1)
             if self.gui.guiobj.state == 1:
-                update = False
-                while not update:
-                    update = self.step()
-                    self.idx += 1
-            elif self.gui.guiobj.state == 2:
-                self.gui.guiobj.state = 0
-                update = False
-                while not update:
-                    update = self.step()
-                    self.idx += 1
-        print("icp %s seconds" % self.dur)
-
-    def step(self):
-        scan, odom = self.raw_data[self.idx]
-        rot, trans = getRtFromM(self.scan_base)
-        scan = transpose(rot, trans, scan)
-        try:
-            if not self.checkupdate(matrix_to_pose(self.last_odom),matrix_to_pose(odom)):
-                return False    
-            last_odom = self.last_odom
-            last_scan = self.last_scan
-            self.last_odom = odom
-            self.last_scan = scan
-        except AttributeError:
-            self.last_odom = odom
-            self.last_scan = scan
-            return False
-
-        delta_odom_init = getDeltaM(last_odom, odom)
-        delta_rot_init, delta_trans_init = getRtFromM(delta_odom_init)
-
-        #start_time = time.time()
-        icp = ICP(last_scan, scan)
-        #delta_rot, delta_trans, cost = icp.calculate(20, delta_rot_init, delta_trans_init, 0.01)
-        delta_rot = delta_rot_init
-        delta_trans = delta_trans_init
+                print 'wait optimization...'
+                self.pg.optimize(opt_iter_)
+                self.update()
+                self.show_graph()
+                self.show_pointcloud()
+                break
 
 
+    def readdata(self, raw_data):
+        data = []
+        for scan, odom in raw_data:
+            
+            rot, trans = getRtFromM(self.scan_base)
+            scan = transpose(rot, trans, scan)
+
+            pose = t2v(odom).ravel()
+            if len(data) == 0:
+                data.append((scan, pose))
+
+            if not self.checkupdate(data[-1][1],pose):
+                continue    
+
+            data.append((scan, pose))
+
+            #print pose
+        return data
+
+    def creategraph(self, data):
+        nodes = []
+        edges = []
+        # Generate basic nodes and edges for graph
+        for i in range(len(data)):
+            scan, pose = data[i]
+            nodes.append(pose)
+            self.pg.nodes.append(pose)
+            if i == 0:
+                continue
+            infm = np.array([[weight_trans_, 0, 0],
+                            [0,  weight_trans_, 0],
+                            [0,  0,  weight_rot_]])
+            edge = [i-1, i, get_motion_vector(nodes[i], nodes[i-1]), infm]
+            edges.append(edge)
+            self.pg.edges.append(PoseEdge(*edge))
+        self.pg.nodes = np.array(self.pg.nodes)        
         
-        delta_odom = getMFromRt(delta_rot, delta_trans)
-        
+        # Detecte the loop-closing
+        for i in range(len(data)):
+            if i + min_loop_dist_ >= len(data):
+                continue
+            scan_i, pose_i = data[i]
+            if not check_loop_candidate(scan_i):
+                continue
+            for j in range(i + min_loop_dist_, len(data)):
+                scan_j, pose_j = data[j]
+                dst = distance.euclidean(pose_i[0:2],pose_j[0:2])
+                if dst > max_dist_:
+                    continue
 
-        print 'init yaw:',matrix_to_pose(delta_odom_init)[2]
-        print 'icp yaw:',matrix_to_pose(delta_odom)[2]
-        self.pose_matrix = np.dot(self.pose_matrix, delta_odom)
+                delta_odom_init = getDeltaM(v2t(pose_i), v2t(pose_j))
+                delta_rot_init, delta_trans_init = getRtFromM(delta_odom_init)
 
-        self.graph_base.append((scan, delta_odom, self.pose_matrix))
-        #print self.pose_matrix
-        rot, trans = getRtFromM(self.pose_matrix)
-        scan_t = transpose(rot, trans, scan)
-        self.gui.setpcd(scan_t)
-        self.gui.setrobot(matrix_to_pose(self.pose_matrix))
-        return True
-       # print self.idx, cost
+                #start_time = time.time()
+                icp = ICP(scan_i, scan_j)
+                delta_rot, delta_trans, cost = icp.calculate(20, delta_rot_init, delta_trans_init, max_dist_)
+                t2v(getMFromRt(delta_rot, delta_trans))
 
+                infm = np.array([[weight_trans_, 0, 0],
+                                [0,  weight_trans_, 0],
+                                [0,  0,  weight_rot_]])
+                edge = [i, j, t2v(getMFromRt(delta_rot, delta_trans)), infm]
+                edges.append(edge)
+                self.pg.edges.append(PoseEdge(*edge))
 
 if __name__ == "__main__":
     gui = graphSLAM_GUI_Thread()
     gui.start()
 
     bagreader = BagReader(bagfile, scan_topic, odom_topic, start_time, end_time)
-    start_time = time.time()
-    slam = graphSLAM(bagreader.data, gui)
-    start_time = time.time()
+    slam = graphSLAM(bagreader.data,gui)
     slam.run()
-    print("--- %s seconds ---" % (time.time() - start_time))
+    time.sleep(1000)
+    start_time = time.time()

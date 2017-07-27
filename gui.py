@@ -41,7 +41,7 @@ class graphSLAM_GUI(QtGui.QTabWidget):
         self.vb.setAspectLocked()
         gv.setCentralItem(self.vb)
         #Create ImageItem for map
-        self.img = pg.ImageItem(np.zeros((400,400)))
+        self.img = pg.ImageItem(np.zeros((800,800)))
         self.vb.addItem(self.img)
 
     def ceate_tab_pointcloud(self):
@@ -127,7 +127,7 @@ class graphSLAM_GUI_Thread(threading.Thread):
     def run(self):
         app=QtGui.QApplication(sys.argv) 
         self.guiobj=graphSLAM_GUI() 
-        self.guiobj.setWindowTitle("Gui")
+        self.guiobj.setWindowTitle("graphSLAM v0.1 author:liu ")
         self.guiobj.resize(800,600)
         timer = pg.QtCore.QTimer()
         timer.timeout.connect(self.update)
@@ -147,10 +147,11 @@ class graphSLAM_GUI_Thread(threading.Thread):
         try:
             data = self.q_pcd.get(block=False)
             self.q_pcd.queue.clear()
-            self.guiobj.cur_scan.clear()
-            #spots = [{'pos': data[i,:] } for i in range(data.shape[0])]
+            #self.guiobj.cur_scan.clear()
+            #self.guiobj.cur_scan.addPoints(data[:,0],data[:,1])
+
+            self.guiobj.pcd.clear()
             self.guiobj.pcd.addPoints(data[:,0],data[:,1])
-            self.guiobj.cur_scan.addPoints(data[:,0],data[:,1])
         except Queue.Empty:
             pass
         try:

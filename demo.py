@@ -11,6 +11,10 @@ from posegraph import PoseGraph, PoseEdge
 from pyflann import FLANN
 
 from scipy.spatial import distance
+
+from hough import check_loop_candidate
+
+
 ##########################
 #bagfile = '/home/liu/tokyo_bag/lg_2.bag'
 bagfile = '/home/liu/tokyo_bag/lg_2.bag'
@@ -44,7 +48,7 @@ a_thresh_ = np.pi/6
 
 
 class graphSLAM():
-    def __init__(self, raw_data,gui):
+    def __init__(self,gui):
         self.gui = gui
         x = base_x_
         y = base_y_
@@ -53,8 +57,23 @@ class graphSLAM():
             [np.sin(yaw),  np.cos(yaw),  y],
             [0.,0.,1.]])
         self.pg = PoseGraph() # LS-SLAM pose graph
-        self.data = self.readdata(raw_data)
-        self.creategraph(self.data)
+        #self.data = self.readdata(raw_data)
+        
+        data = np.array([[0.,0,0],\
+            [1,0,-0.57],\
+            [1,-1,-1.14],\
+            [0,-1,1.57],\
+            [0,-0.2,0],\
+            ])
+        """
+        data = np.array([[0.,0,0],\
+            [1,0,0],\
+            [2,0,0],\
+            [3,0,0],\
+            [4,0,0],\
+            ])
+        """
+        self.creategraph(data)
         self.data = []
         self.node = []
         self.edge = []
@@ -72,7 +91,18 @@ class graphSLAM():
         return update
 
     def run(self):
-        self.creategraph(self.data)
+        while True:
+            time.sleep(0.1)
+            if self.gui.guiobj.state == 1:
+            #self.creategraph(self.data)
+                print 'wait optimization...'
+                print self.pg.nodes.shape
+                self.pg.optimize(1)
+                adj = np.array([[edge.id_from, edge.id_to] for edge in self.pg.edges])
+                pos = self.pg.nodes[:,0:2]
+                self.gui.setgraph(pos, adj)
+                break
+        print self.pg.nodes
 
     def readdata(self, raw_data):
         data = []
@@ -96,60 +126,64 @@ class graphSLAM():
     def creategraph(self, data):
         nodes = []
         edges = []
+
         for i in range(len(data)):
-            scan, pose = data[i]
+            pose = data[i]
             nodes.append(pose)
             self.pg.nodes.append(pose)
             if i == 0:
                 continue
-            infm = np.array([[1, 0, 0],
-                            [0,  1, ],
-                            [0,  0,  1]])
-            edge = [i-1, i, get_motion_vector(nodes[i], nodes[i-1]), infm]
+            infm = np.array([[20., 0, 0],
+                            [0,  20, 0],
+                            [0,  0,  1000]])
+        
+            edge = [i-1, i, get_motion_vector(nodes[i],nodes[i-1]), infm]
             edges.append(edge)
             self.pg.edges.append(PoseEdge(*edge))
 
-        self.pg.nodes = np.array(self.pg.nodes)        
-        #flann = FLANN()
-
-        for i in range(len(data)):
-            if i + 20 < len(data):
-                for j in range(i + 20, len(data)):
-                    scan_i, pose_i = data[i]
-                    scan_j, pose_j = data[j]
-                    dst = distance.euclidean(pose_i[0:2],pose_j[0:2])
-                    if dst < 1:
-                        infm = np.array([[1, 0, 0],
-                            [0,  1, ],
-                            [0,  0,  1]])
-                        edge = [i, j, get_motion_vector(nodes[j], nodes[i]), infm]
-                        edges.append(edge)
-                        self.pg.edges.append(PoseEdge(*edge))                
-
-            
-            
-            
-        pass
-
-    def findloop(self, data):
-        nodes = []
-        edges = []
-        for i in range(len(data)):
-            scan, pose = data[i]
-            nodes.append(pose)
-            self.pg.nodes.append(pose)
-            if i == 0:
-                continue
-            infm = np.array([[1, 0, 0],
-                            [0,  1, ],
-                            [0,  0,  1]])
-            edge = [i-1, i, get_motion_vector(nodes[i], nodes[i-1]), infm]
-            edges.append(edge)
-            self.pg.edges.append(PoseEdge(*edge))
         self.pg.nodes = np.array(self.pg.nodes)
-        pass
 
-        #pg.nodes = np.array(pg.nodes)
+        loopedges = np.array([[0,4]])
+        for idpair in loopedges:
+            infm = np.array([[20., 0, 0],
+                [0,  20, 0],
+                [0,  0,  1000]])
+            edge = [idpair[0], idpair[1], np.array([0.,0, 0]), infm]
+            edges.append(edge)
+            self.pg.edges.append(PoseEdge(*edge))
+
+
+        #flann = FLANN()
+        """
+        for i in range(len(data)):
+            if i + 20 >= len(data):
+                continue
+            scan_i, pose_i = data[i]
+            if not check_loop_candidate(scan_i):
+                continue
+            for j in range(i + 20, len(data)):
+                scan_j, pose_j = data[j]
+                dst = distance.euclidean(pose_i[0:2],pose_j[0:2])
+                if dst > 1:
+                    continue
+
+                delta_odom_init = getDeltaM(v2t(pose_i), v2t(pose_j))
+                delta_rot_init, delta_trans_init = getRtFromM(delta_odom_init)
+
+                #start_time = time.time()
+                icp = ICP(scan_i, scan_j)
+                delta_rot, delta_trans, cost = icp.calculate(20, delta_rot_init, delta_trans_init, 0.5)
+                t2v(getMFromRt(delta_rot, delta_trans))
+
+                infm = np.array([[1., 0, 0],
+                    [0,  1, 0],
+                    [0,  0,  1]])
+                edge = [i, j, t2v(getMFromRt(delta_rot, delta_trans)), infm]
+                edges.append(edge)
+                self.pg.edges.append(PoseEdge(*edge))                
+        """    
+            
+
 
 
         
@@ -159,7 +193,8 @@ if __name__ == "__main__":
     gui = graphSLAM_GUI_Thread()
     gui.start()
 
-    bagreader = BagReader(bagfile, scan_topic, odom_topic, start_time, end_time)
-    slam = graphSLAM(bagreader.data,gui)
+    #bagreader = BagReader(bagfile, scan_topic, odom_topic, start_time, end_time)
+    slam = graphSLAM(gui)
+    slam.run()
     time.sleep(1000)
     start_time = time.time()

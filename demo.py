@@ -17,7 +17,7 @@ from hough import check_loop_candidate
 
 ##########################
 #bagfile = '/home/liu/tokyo_bag/lg_2.bag'
-bagfile = '/home/liu/tokyo_bag/lg_2.bag'
+bagfile = '/home/liu/tokyo_bag/lg_1.bag'
 scan_topic = '/scan' 
 odom_topic = '/odom'
 #bagfile = '/home/liu/bag_kusatsu/rp_kusatsu_C5_1.bag'
@@ -47,154 +47,61 @@ a_thresh_ = np.pi/6
 ##########################
 
 
-class graphSLAM():
-    def __init__(self,gui):
-        self.gui = gui
-        x = base_x_
-        y = base_y_
-        yaw = base_yaw_
-        self.scan_base = np.array([[np.cos(yaw), -np.sin(yaw),x], 
-            [np.sin(yaw),  np.cos(yaw),  y],
-            [0.,0.,1.]])
-        self.pg = PoseGraph() # LS-SLAM pose graph
-        #self.data = self.readdata(raw_data)
-        
-        data = np.array([[0.,0,0],\
-            [1,0,-0.57],\
-            [1,-1,-1.14],\
-            [0,-1,1.57],\
-            [0,-0.2,0],\
-            ])
-        """
-        data = np.array([[0.,0,0],\
-            [1,0,0],\
-            [2,0,0],\
-            [3,0,0],\
-            [4,0,0],\
-            ])
-        """
-        self.creategraph(data)
-        self.data = []
-        self.node = []
-        self.edge = []
-        adj = np.array([[edge.id_from, edge.id_to] for edge in self.pg.edges])
-        pos = self.pg.nodes[:,0:2]
-        self.gui.setgraph(pos, adj)
+pg = PoseGraph()
 
+data = np.array([[0.,0,0],\
+    [1,0,-0.57],\
+    [1,-1,-1.14],\
+    [0,-1,1.57],\
+    [0,-0.2,0],\
+    ])
+loopedges = np.array([[0,4]])
 
-    def checkupdate(self,pre_pose,cur_pose):
-        dx = pre_pose[0] - cur_pose[0]
-        dy = pre_pose[1] - cur_pose[1]
-        da = pre_pose[2] - cur_pose[2]
-        trans = sqrt(dx**2 + dy**2)
-        update = (trans > d_thresh_) or (fabs(da) > a_thresh_)
-        return update
+def creategraph(data):
+    nodes = []
+    edges = []
+    for i in range(len(data)):
+        pose = data[i]
+        nodes.append(pose)
+        pg.nodes.append(pose)
+        if i == 0:
+            continue
+        infm = np.array([[20., 0, 0],
+                        [0,  20, 0],
+                        [0,  0,  1000]])
+        edge = [i-1, i, get_motion_vector(nodes[i],nodes[i-1]), infm]
+        edges.append(edge)
+        pg.edges.append(PoseEdge(*edge))
+    pg.nodes = np.array(pg.nodes)
+    for idpair in loopedges:
+        infm = np.array([[20., 0, 0],
+            [0,  20, 0],
+            [0,  0,  1000]])
+        edge = [idpair[0], idpair[1], np.array([0.,0, 0]), infm]
+        edges.append(edge)
+        pg.edges.append(PoseEdge(*edge))
 
-    def run(self):
-        while True:
-            time.sleep(0.1)
-            if self.gui.guiobj.state == 1:
-            #self.creategraph(self.data)
-                print 'wait optimization...'
-                print self.pg.nodes.shape
-                self.pg.optimize(1)
-                adj = np.array([[edge.id_from, edge.id_to] for edge in self.pg.edges])
-                pos = self.pg.nodes[:,0:2]
-                self.gui.setgraph(pos, adj)
-                break
-        print self.pg.nodes
-
-    def readdata(self, raw_data):
-        data = []
-        for scan, odom in raw_data:
             
-            rot, trans = getRtFromM(self.scan_base)
-            scan = transpose(rot, trans, scan)
-
-            pose = t2v(odom).ravel()
-            if len(data) == 0:
-                data.append((scan, pose))
-
-            if not self.checkupdate(data[-1][1],pose):
-                continue    
-
-            data.append((scan, pose))
-
-            #print pose
-        return data
-
-    def creategraph(self, data):
-        nodes = []
-        edges = []
-
-        for i in range(len(data)):
-            pose = data[i]
-            nodes.append(pose)
-            self.pg.nodes.append(pose)
-            if i == 0:
-                continue
-            infm = np.array([[20., 0, 0],
-                            [0,  20, 0],
-                            [0,  0,  1000]])
-        
-            edge = [i-1, i, get_motion_vector(nodes[i],nodes[i-1]), infm]
-            edges.append(edge)
-            self.pg.edges.append(PoseEdge(*edge))
-
-        self.pg.nodes = np.array(self.pg.nodes)
-
-        loopedges = np.array([[0,4]])
-        for idpair in loopedges:
-            infm = np.array([[20., 0, 0],
-                [0,  20, 0],
-                [0,  0,  1000]])
-            edge = [idpair[0], idpair[1], np.array([0.,0, 0]), infm]
-            edges.append(edge)
-            self.pg.edges.append(PoseEdge(*edge))
-
-
-        #flann = FLANN()
-        """
-        for i in range(len(data)):
-            if i + 20 >= len(data):
-                continue
-            scan_i, pose_i = data[i]
-            if not check_loop_candidate(scan_i):
-                continue
-            for j in range(i + 20, len(data)):
-                scan_j, pose_j = data[j]
-                dst = distance.euclidean(pose_i[0:2],pose_j[0:2])
-                if dst > 1:
-                    continue
-
-                delta_odom_init = getDeltaM(v2t(pose_i), v2t(pose_j))
-                delta_rot_init, delta_trans_init = getRtFromM(delta_odom_init)
-
-                #start_time = time.time()
-                icp = ICP(scan_i, scan_j)
-                delta_rot, delta_trans, cost = icp.calculate(20, delta_rot_init, delta_trans_init, 0.5)
-                t2v(getMFromRt(delta_rot, delta_trans))
-
-                infm = np.array([[1., 0, 0],
-                    [0,  1, 0],
-                    [0,  0,  1]])
-                edge = [i, j, t2v(getMFromRt(delta_rot, delta_trans)), infm]
-                edges.append(edge)
-                self.pg.edges.append(PoseEdge(*edge))                
-        """    
-            
-
-
-
-        
+def show_graph(gui):
+    adj = np.array([[edge.id_from, edge.id_to] for edge in pg.edges])
+    pos = pg.nodes[:,0:2]
+    gui.setgraph(pos, adj)
 
 
 if __name__ == "__main__":
     gui = graphSLAM_GUI_Thread()
     gui.start()
-
+    creategraph(data)
+    show_graph(gui)
+    while True:
+        time.sleep(0.1)
+        if gui.guiobj.state != 1:
+            continue
+        pg.optimize(5)
+        show_graph(gui)
+        gui.guiobj.state = 0
+        
     #bagreader = BagReader(bagfile, scan_topic, odom_topic, start_time, end_time)
-    slam = graphSLAM(gui)
-    slam.run()
+    #slam = graphSLAM(gui)
+    #slam.run()
     time.sleep(1000)
-    start_time = time.time()

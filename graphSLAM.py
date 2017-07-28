@@ -17,8 +17,10 @@ from costmap import CostMap
 
 
 ##########################
-bagfile = '/home/liu/tokyo_bag/lg_2.bag'
-#bagfile = '/home/liu/tokyo_bag/rp_2.bag'
+#bagfile = '/home/liu/tokyo_bag/lg_1.bag'
+bagfile = '/home/liu/bag_kusatsu/lg_kusatsu_C7_1.bag'
+
+#bagfile = '/home/liu/tokyo_bag/rp_1.bag'
 scan_topic = '/scan' 
 odom_topic = '/odom'
 #bagfile = '/home/liu/bag_kusatsu/rp_kusatsu_C5_1.bag'
@@ -43,11 +45,11 @@ base_yaw_ = 0.03
 #base_yaw_ = -1.54
 
 ##########################
-d_thresh_ = .5
-a_thresh_ = np.pi/6
+d_thresh_ = 0.5
+a_thresh_ = np.pi/3
 ##########################
 min_loop_dist_ = 30
-max_dist_ = 1
+max_dist_ = 0.3
 weight_trans_ = 1
 weight_rot_ = 100
 opt_iter_ = 5
@@ -65,10 +67,14 @@ class graphSLAM():
             [0.,0.,1.]])
         self.pg = PoseGraph() # LS-SLAM pose graph
         self.node_scan = self.readdata(raw_data)
+        print("Generating graph...")
         self.creategraph(self.node_scan)
+        print("Graph OK.")
         # Show graph before optimization
         self.show_graph()
         self.show_pointcloud()
+        #print("waiting create map ...")
+        #self.show_map()
 
         #self.gui.setpcd(pos, adj)
 
@@ -84,14 +90,25 @@ class graphSLAM():
             pcd = np.vstack((pcd,scan_trans))
         self.gui.setpcd(pcd)
 
-    def show_map(self):
+    def show_map(self, use_gaussian = False):
+        
+        self.costmap.map_data.fill(0)
+        pcd = np.array([[0,0]])
         for scan, pose in self.node_scan:
             scan_trans = transpose_by_pose(pose,scan)
             pcd = np.vstack((pcd,scan_trans))
-            idx = self.costmap.world_map(pcd)
-            
-        self.gui.setpcd(pcd)
-
+        idx = self.costmap.world_map(pcd)
+        
+        for i in range(idx.shape[0]):
+            p = idx[i,:].astype(int)
+            if use_gaussian:
+                self.costmap.updateCostMap(p, 30, True)
+            else:
+                self.costmap.updateCostMap(p, 10, False)
+        self.gui.setmap(self.costmap.map_data)
+        
+                
+        
 
     def update(self):
         pcd = np.array([[0,0]])
@@ -112,16 +129,14 @@ class graphSLAM():
         update = (trans > d_thresh_) or (fabs(da) > a_thresh_)
         return update
 
-    def run(self):
-        while True:
-            time.sleep(0.1)
-            if self.gui.guiobj.state == 1:
-                print 'wait optimization...'
-                self.pg.optimize(opt_iter_)
-                self.update()
-                self.show_graph()
-                self.show_pointcloud()
-                break
+    def optimize(self):
+        print('Waiting optimization...')
+        self.pg.optimize(opt_iter_)
+        print('Optimization OK.')
+        self.update()
+        self.show_graph()
+        self.show_pointcloud()
+        
 
 
     def readdata(self, raw_data):
@@ -192,9 +207,8 @@ class graphSLAM():
 if __name__ == "__main__":
     gui = graphSLAM_GUI_Thread()
     gui.start()
-
     bagreader = BagReader(bagfile, scan_topic, odom_topic, start_time, end_time)
     slam = graphSLAM(bagreader.data,gui)
-    slam.run()
+    gui.guiobj.set_slam_core(slam)
     time.sleep(1000)
     start_time = time.time()

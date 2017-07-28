@@ -14,19 +14,37 @@ from RobotItem import RobotItem
 
 import matplotlib.pyplot as plt
 
+import warnings
+warnings.filterwarnings("ignore")
+
 class graphSLAM_GUI(QtGui.QTabWidget): 
     def __init__(self,parent=None):
         self.q = Queue.Queue()
         super(graphSLAM_GUI,self).__init__(parent)
         self.ceate_tab_pointcloud()
         self.ceate_tab_map()
+        pg.setConfigOption('background', 'w')
         self.state = 0
+        
+
+    def set_slam_core(self,slam_core):
+        self.slam_core = slam_core  
 
     def handleButton_play(self):
-        self.state = 1  
+        try:
+            self.slam_core.optimize()
+        except:
+            pass
+        self.state = 1 # used by demo
 
     def handleButton_next(self):
         self.state = 2 
+
+    def handleButton_createmap(self):
+        self.slam_core.show_map()
+
+    def handleButton_createmap_g(self):
+        self.slam_core.show_map(True)
 
     def ceate_tab_map(self):
         #  Create tab_map 
@@ -41,8 +59,18 @@ class graphSLAM_GUI(QtGui.QTabWidget):
         self.vb.setAspectLocked()
         gv.setCentralItem(self.vb)
         #Create ImageItem for map
-        self.img = pg.ImageItem(np.zeros((800,800)))
+        self.img = pg.ImageItem(np.zeros((1600,1600)))
         self.vb.addItem(self.img)
+
+        button_createmap = QtGui.QPushButton('Create map')
+        button_createmap.setFixedWidth(110)
+        button_createmap.clicked.connect(self.handleButton_createmap)
+        layout.addWidget(button_createmap, 2, 0)
+
+        button_createmap_g = QtGui.QPushButton('Create map(G)')
+        button_createmap_g.setFixedWidth(110)
+        button_createmap_g.clicked.connect(self.handleButton_createmap_g)
+        layout.addWidget(button_createmap_g, 2, 1)
 
     def ceate_tab_pointcloud(self):
         #  Create tab_pointcloud 
@@ -58,8 +86,8 @@ class graphSLAM_GUI(QtGui.QTabWidget):
         gv.setCentralItem(self.vb)
         #Create ImageItem for map
 
-        button_play = QtGui.QPushButton('Play')
-        button_play.setFixedWidth(110)
+        button_play = QtGui.QPushButton('Graph optimization')
+        button_play.setFixedWidth(180)
         button_play.clicked.connect(self.handleButton_play)
 
         button_next = QtGui.QPushButton('Next')
@@ -67,7 +95,7 @@ class graphSLAM_GUI(QtGui.QTabWidget):
         button_next.clicked.connect(self.handleButton_next)
 
         layout.addWidget(button_play, 2, 0)
-        layout.addWidget(button_next, 2, 1)
+        #layout.addWidget(button_next, 2, 1)
 
         self.pcd = pg.ScatterPlotItem(size=3, pen=pg.mkPen(None), brush=pg.mkBrush(255, 255, 255, 120))
         self.vb.addItem(self.pcd)
@@ -79,35 +107,12 @@ class graphSLAM_GUI(QtGui.QTabWidget):
         self.vb.addItem(self.cur_scan)
 
         self.robot = RobotItem('b')
-        self.robot.setParentItem(self.pcd)
+        #no robot show
+        #self.robot.setParentItem(self.pcd)
         self.robot.scale(0.03,0.03)
 
         self.graph = pg.GraphItem(size=10, symbol="o", symbolPen="w", symbolBrush="y")
         self.vb.addItem(self.graph)
-        #self.graph.setParentItem(self.pcd)
-        """
-        pos = np.array([
-            [0,0],
-            [10,0],
-            [0,10],
-            [10,10],
-            [5,5],
-            [15,5]
-            ])
-        adj = np.array([
-            [0,1],
-            [1,3],
-            [3,2],
-            [2,0],
-            [1,5],
-            [3,5],
-            ])
-        lines = np.tile([255,0,0,255,1], (adj.shape[0],1))
-        self.graph.setData(pos=pos, adj=adj,pen = lines)
-        """
-
-
-
 
 class graphSLAM_GUI_Thread(threading.Thread):
     def __init__(self):
@@ -115,24 +120,16 @@ class graphSLAM_GUI_Thread(threading.Thread):
         self.q_map = Queue.Queue()
         self.q_pcd = Queue.Queue()
         self.q_graph = Queue.Queue()
-
         self.state = 0
-
-
-        #Set timer
-        #timer = pg.QtCore.QTimer()
-        #timer.timeout.connect(self.update)
-        #timer.start(300)
 
     def run(self):
         app=QtGui.QApplication(sys.argv) 
         self.guiobj=graphSLAM_GUI() 
-        self.guiobj.setWindowTitle("graphSLAM v0.1 author:liu ")
+        self.guiobj.setWindowTitle("graphSLAM v0.1")
         self.guiobj.resize(800,600)
         timer = pg.QtCore.QTimer()
         timer.timeout.connect(self.update)
         timer.start(300)
-
         self.guiobj.show() 
         app.exec_()
 
@@ -158,31 +155,26 @@ class graphSLAM_GUI_Thread(threading.Thread):
             pos,adj  = self.q_graph.get(block=False)
             lines = np.tile([255,0,0,255,1], (adj.shape[0],1))
             self.guiobj.graph.setData(pos=pos, adj=adj,pen = lines)
-        except Queue.Empty:
+        except:
             pass
 
     def setmap(self, data):
         self.q_map.put( data )
-        
 
     def setpcd(self, data):
         self.q_pcd.put( data )
-        
-    
+      
     def setrobot(self, pose):
         self.guiobj.robot.setRotation(180.*pose[2]/np.pi)
         self.guiobj.robot.setPos(pose[0],pose[1])
 
     def setgraph(self, pos, adj):
-        
         self.q_graph.put( (pos, adj) )
-
 
 if __name__ == "__main__":
     gui = graphSLAM_GUI_Thread()
     gui.start()
     time.sleep(0.1)
-    
     print 'sample gui test'
     for i in range(2000):
         time.sleep(0.05)

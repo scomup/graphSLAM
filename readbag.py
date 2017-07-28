@@ -31,7 +31,7 @@ class BagReader:
         self.readodom()
         print "Data sync..."
         self.sync()
-        print "All ready."
+        print "Bag data ready."
         self.bag.close()
 
     def readscan(self):

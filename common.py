@@ -66,17 +66,9 @@ def angle_diff(a, b):
         return d1
     else:
         return d2
-
-# see g2o.pdf in https://github.com/RainerKuemmerle/g2o/tree/master/doc
-def apply_motion_vector(pose, motion):
-    return np.array([(pose[0]+motion[0]*np.cos(motion[2])-motion[1]*np.sin(motion[2])), \
-            (pose[1]+motion[0]*np.sin(motion[2])+motion[1]*np.cos(motion[2])), \
-            np.mod(pose[2]+motion[2], 2*np.pi)-np.pi])
     
 def get_motion_vector(pose1, pose2):
     return t2v(getDeltaM(v2t(pose2),v2t(pose1)))
-    
-###
 
 
 def transpose(R, t, scan):

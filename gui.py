@@ -117,6 +117,7 @@ class graphSLAM_GUI(QtGui.QTabWidget):
 class graphSLAM_GUI_Thread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
+        self.setDaemon(True)
         self.q_map = Queue.Queue()
         self.q_pcd = Queue.Queue()
         self.q_graph = Queue.Queue()
@@ -152,9 +153,10 @@ class graphSLAM_GUI_Thread(threading.Thread):
         except Queue.Empty:
             pass
         try:
-            pos,adj  = self.q_graph.get(block=False)
+            pos,adj, symbol = self.q_graph.get(block=False)
+            adj.shape[0]
             lines = np.tile([255,0,0,255,1], (adj.shape[0],1))
-            self.guiobj.graph.setData(pos=pos, adj=adj,pen = lines)
+            self.guiobj.graph.setData(pos=pos, adj=adj, pen=lines, symbol=symbol)
         except:
             pass
 
@@ -168,8 +170,14 @@ class graphSLAM_GUI_Thread(threading.Thread):
         self.guiobj.robot.setRotation(180.*pose[2]/np.pi)
         self.guiobj.robot.setPos(pose[0],pose[1])
 
-    def setgraph(self, pos, adj):
-        self.q_graph.put( (pos, adj) )
+    def setgraph(self, pos, adj, loop_nodes = None):
+        
+        if loop_nodes is not None:
+            symbol = np.array(["x"]*len(pos))
+            symbol[np.array(loop_nodes)] = 'o'
+        else:
+            symbol = np.array(["x"]*len(pos))
+        self.q_graph.put( (pos, adj, symbol) )
 
 if __name__ == "__main__":
     gui = graphSLAM_GUI_Thread()
@@ -189,7 +197,7 @@ if __name__ == "__main__":
             [1,5],
             [3,5],
             ])
-        gui.setgraph(pos, adj)
+        gui.setgraph(pos, adj,[0])
     
 
 

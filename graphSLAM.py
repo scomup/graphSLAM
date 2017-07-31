@@ -9,18 +9,25 @@ from readbag import BagReader
 from common import *
 from posegraph import PoseGraph, PoseEdge
 from pyflann import FLANN
-
+import sys
 from scipy.spatial import distance
-
 from hough import check_loop_candidate
 from costmap import CostMap
+import matplotlib.pyplot as plt
 
+args = sys.argv
 
 ##########################
+icp_debug_ = False
+##########################
 #bagfile = '/home/liu/tokyo_bag/lg_1.bag'
-bagfile = '/home/liu/bag_kusatsu/lg_kusatsu_C7_1.bag'
+bagfile = '/home/liu/bag_kusatsu/lg_kusatsu_C5_1.bag'
 
-#bagfile = '/home/liu/tokyo_bag/rp_1.bag'
+if len(args) > 1:
+    bagfile = args[1]
+#bagfile = '/home/liu/tokyo_bag/rp_2.bag'
+#bagfile = '/home/liu/tokyo_bag/ap/wall1.bag'
+
 scan_topic = '/scan' 
 odom_topic = '/odom'
 #bagfile = '/home/liu/bag_kusatsu/rp_kusatsu_C5_1.bag'
@@ -48,11 +55,16 @@ base_yaw_ = 0.03
 d_thresh_ = 0.5
 a_thresh_ = np.pi/3
 ##########################
-min_loop_dist_ = 30
-max_dist_ = 0.3
+min_loop_dist_ = 20
+max_dist_ = 0.5
 weight_trans_ = 1
 weight_rot_ = 100
 opt_iter_ = 5
+##########################
+first_cost_ = 2
+second_cost_ = 5
+hough_weight_ = 0.1
+use_cost_threshold_ = True
 ##########################
 
 class graphSLAM():
@@ -81,7 +93,7 @@ class graphSLAM():
     def show_graph(self):
         adj = np.array([[edge.id_from, edge.id_to] for edge in self.pg.edges])
         pos = self.pg.nodes[:,0:2]
-        self.gui.setgraph(pos, adj)
+        self.gui.setgraph(pos, adj, self.loop_candidates)
 
     def show_pointcloud(self):
         pcd = np.array([[0,0]])
@@ -161,7 +173,7 @@ class graphSLAM():
     def creategraph(self, data):
         nodes = []
         edges = []
-        # Generate basic nodes and edges for graph
+        # Generate basic nodes and edges for our pose graph
         for i in range(len(data)):
             scan, pose = data[i]
             nodes.append(pose)
@@ -176,39 +188,70 @@ class graphSLAM():
             self.pg.edges.append(PoseEdge(*edge))
         self.pg.nodes = np.array(self.pg.nodes)        
         
-        # Detecte the loop-closing
+        # Detect the loop-closing
+        loop_count = 0
+        self.loop_candidates = []
         for i in range(len(data)):
             if i + min_loop_dist_ >= len(data):
                 continue
             scan_i, pose_i = data[i]
-            if not check_loop_candidate(scan_i):
+            if not check_loop_candidate(scan_i, hough_weight_):
                 continue
+            self.loop_candidates.append(i)
             for j in range(i + min_loop_dist_, len(data)):
                 scan_j, pose_j = data[j]
                 dst = distance.euclidean(pose_i[0:2],pose_j[0:2])
                 if dst > max_dist_:
                     continue
-
+                #if not check_loop_candidate(scan_j, hough_weight_):
+                #    continue
+                loop_count += 1
                 delta_odom_init = getDeltaM(v2t(pose_i), v2t(pose_j))
                 delta_rot_init, delta_trans_init = getRtFromM(delta_odom_init)
 
                 #start_time = time.time()
                 icp = ICP(scan_i, scan_j)
-                delta_rot, delta_trans, cost = icp.calculate(20, delta_rot_init, delta_trans_init, max_dist_)
-                t2v(getMFromRt(delta_rot, delta_trans))
+                delta_rot, delta_trans, cost = icp.calculate(200, delta_rot_init, delta_trans_init, max_dist_)
+                if(cost > first_cost_):
+                    #print 'old cost:',cost
+                    delta_rot, delta_trans, cost = icp.calculate(200, delta_rot, delta_trans, 0.5)
+                    #print 'new cost:',cost
+                    #print '-------------'
+                if(use_cost_threshold_ and (cost > second_cost_)):
+                    continue
+                #cost = cost/5
 
-                infm = np.array([[weight_trans_, 0, 0],
-                                [0,  weight_trans_, 0],
-                                [0,  0,  weight_rot_]])
+                if icp_debug_:
+                    new_scan_j = transpose(delta_rot, delta_trans.ravel(),scan_j)
+                    scan_j = transpose(delta_rot_init, delta_trans_init.ravel(),scan_j)
+                    show_icp_matching(scan_i,new_scan_j,scan_j, str(i)+'-->'+str(j)+'cost:'+str(cost))
+                    #plt.show()
+
+                infm = np.array([[weight_trans_/cost**2, 0, 0],
+                                [0,  weight_trans_/cost**2, 0],
+                                [0,  0,  weight_rot_/cost**2]])
                 edge = [i, j, t2v(getMFromRt(delta_rot, delta_trans)), infm]
                 edges.append(edge)
                 self.pg.edges.append(PoseEdge(*edge))
+        print('{0} loop have been detected!'.format(loop_count))
 
+
+def show_icp_matching(a,b,c, str):
+    fig, ax = plt.subplots()
+    plt.xlim(-4,4)
+    plt.ylim(-4,4)
+    ax.scatter(a[:,0],a[:,1], c='blue',s = 10, label = "previous scan")
+    ax.scatter(b[:,0],b[:,1], c='red',s = 10,label = "current scan(matched)")
+    ax.scatter(c[:,0],c[:,1], c='green',s = 10,label = "current scan")
+    ax.set_title(str)
+    ax.legend()
+
+    
 if __name__ == "__main__":
     gui = graphSLAM_GUI_Thread()
     gui.start()
     bagreader = BagReader(bagfile, scan_topic, odom_topic, start_time, end_time)
     slam = graphSLAM(bagreader.data,gui)
     gui.guiobj.set_slam_core(slam)
-    time.sleep(1000)
-    start_time = time.time()
+    plt.show()
+    input("Press Enter to Exit.\n")

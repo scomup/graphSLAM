@@ -1,11 +1,9 @@
-from utils import t2v, v2t, readPoseGraph
-from solvers import *
-
 import numpy as np
 from scipy.sparse import csr_matrix
 from numpy.linalg import inv
 import time
-
+from common import *
+from scipy.sparse.linalg import spsolve
 class PoseEdge(object):
     def __init__(self, id_from = None, id_to = None, mean = None, infm = None):
         self.id_from = id_from # viewing frame of this edge
@@ -27,46 +25,6 @@ class PoseGraph(object):
         if len(edges)>0: 
             for e in edges:
                 self.edges.append(PoseEdge(*e))
-    
-    def readGraph(self, vfile, efile=None, from_to_order=True):
-        # Reads graph from vertex and edge file (g2o format - see https://github.com/RainerKuemmerle/g2o)
-        if efile is None:
-            self.nodes, constraints = readPoseGraph(vfile)
-            self.nodes = np.array(self.nodes)
-            for e in constraints:
-                self.edges.append(PoseEdge(*e))
-        else:
-            # vertex file
-            vertices = np.loadtxt(vfile, usecols=range(1,5))
-            for i in range(vertices.shape[0]):
-                self.nodes.append(vertices[i, 1:4])
-            self.nodes = np.array(self.nodes, dtype=np.float64)
-            
-            # edge file
-            edges = np.loadtxt(efile, usecols=range(1,12))
-            for i in range(edges.shape[0]):
-                mean = edges[i, 2:5]
-                infm = np.zeros((3,3), dtype=np.float64)
-                # edges[i, 5:11] ... upper-triangular block of the information matrix (inverse cov.matrix) in row-major order
-                infm[0,0] = edges[i, 5]
-                infm[1,0] = infm[0,1] = edges[i, 6]
-                infm[1,1] = edges[i, 7]
-                infm[2,2] = edges[i, 8]
-                infm[0,2] = infm[2,0] = edges[i, 9]
-                infm[1,2] = infm[2,1] = edges[i, 10]
-                if from_to_order:
-                    edge = PoseEdge(int(edges[i,0]), int(edges[i,1]), mean, infm)
-                else:
-                    edge = PoseEdge(int(edges[i,1]), int(edges[i,0]), mean, infm)
-                self.edges.append(edge)
-    
-    def plot(self, plt=None, title=''):
-        if plt is not None:
-            plt.clf()
-            plt.scatter(self.nodes[:, 0], self.nodes[:, 1])
-            plt.title(title)
-            time.sleep(0.1)
-            plt.draw()
     
     def optimize(self, n_iter=1, plt=None):
         # Pose graph optimization

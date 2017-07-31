@@ -104,4 +104,4 @@ if __name__ == "__main__":
     #bagreader = BagReader(bagfile, scan_topic, odom_topic, start_time, end_time)
     #slam = graphSLAM(gui)
     #slam.run()
-    time.sleep(1000)
+input("Press Enter to continue...")
